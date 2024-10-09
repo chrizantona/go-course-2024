@@ -36,3 +36,5 @@ func main() {
 	fmt.Printf("Kind of value for key '3': %s\n", kind2)
 	fmt.Printf("Kind of value for key '2': %s\n", kind3)
 }
+
+// 23874627834
