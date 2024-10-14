@@ -1,4 +1,4 @@
-module 1
+module GO-COURSE-2024
 
 go 1.23.1
 

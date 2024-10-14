@@ -1,0 +1,11 @@
+goos: darwin
+goarch: arm64
+pkg: GO-COURSE-2024/internal/pkg/storage
+cpu: Apple M1
+BenchmarkSet/1-8 	23660637	        50.52 ns/op
+BenchmarkSet/10-8         	17606064	        66.58 ns/op
+BenchmarkSet/100-8        	17072017	        69.36 ns/op
+BenchmarkSet/1000-8       	14597133	        80.23 ns/op
+BenchmarkSet/10000-8      	12639610	        93.79 ns/op
+PASS
+ok  	GO-COURSE-2024/internal/pkg/storage	7.475s

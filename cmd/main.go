@@ -1,7 +1,7 @@
 package main
 
 import (
-	"1/internal/pkg/storage"
+	"GO-COURSE-2024/internal/pkg/storage"
 	"fmt"
 )
 
@@ -36,5 +36,3 @@ func main() {
 	fmt.Printf("Kind of value for key '3': %s\n", kind2)
 	fmt.Printf("Kind of value for key '2': %s\n", kind3)
 }
-
-// 23874627834
