@@ -1,13 +1,21 @@
 package storage
+
 import (
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+type Kind string
+const(
+KindInt Kind = "D"
+KindString Kind = "S"
+KindUnknown Kind = ""
 )
 type Storage struct {
 	inner map[string]string
 	logger *zap.Logger
 }
 func NewStorage() Storage {
-	logger, _ := zap.NewProduction()
+	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
 	defer logger.Sync()
 	logger.Info("created new storage")
 	return Storage{
