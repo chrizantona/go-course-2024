@@ -15,11 +15,12 @@ const (
 	KindInt     Kind = "D"
 	KindString  Kind = "S"
 	KindUnknown Kind = ""
+	KindDict    Kind = "M"
 )
 
 type Storage struct {
 	listStorage map[string][]string
-	inner       map[string]string
+	inner       map[string]interface{}
 	logger      *zap.Logger
 }
 
@@ -29,7 +30,7 @@ func NewStorage() *Storage {
 	logger.Info("created new storage")
 	return &Storage{
 		listStorage: make(map[string][]string),
-		inner:       make(map[string]string),
+		inner:       make(map[string]interface{}),
 		logger:      logger,
 	}
 }
@@ -137,8 +138,14 @@ func (r *Storage) Get(key string) (*string, error) {
 		r.logger.Warn("key not found in storage", zap.String("key", key))
 		return nil, fmt.Errorf("key %s not found", key)
 	}
-	r.logger.Info("retrieved value from storage", zap.String("key", key), zap.String("value", res))
-	return &res, nil
+
+	if strValue, ok := res.(string); ok {
+		r.logger.Info("retrieved value from storage", zap.String("key", key), zap.String("value", strValue))
+		return &strValue, nil 
+	}
+
+	r.logger.Warn("value is not a string", zap.String("key", key))
+	return nil, fmt.Errorf("value for key %s is not a string", key)
 }
 
 func (r *Storage) GetKind(key string) (Kind, error) {
@@ -148,15 +155,27 @@ func (r *Storage) GetKind(key string) (Kind, error) {
 		return KindUnknown, fmt.Errorf("key %s not found", key)
 	}
 
-	if _, err := strconv.Atoi(res); err == nil {
-		kind := KindInt
+	strValue, ok := res.(string)
+	if ok {
+		if _, err := strconv.Atoi(strValue); err == nil {
+			kind := KindInt
+			r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
+			return kind, nil
+		}
+
+		kind := KindString
 		r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
 		return kind, nil
 	}
 
-	kind := KindString
-	r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
-	return kind, nil
+	if _, ok := res.(map[string]interface{}); ok {
+		kind := KindDict
+		r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
+		return kind, nil
+	}
+
+	r.logger.Warn("unknown kind for key", zap.String("key", key))
+	return KindUnknown, fmt.Errorf("unknown kind for key %s", key)
 }
 
 func (s *Storage) SaveToFile(filename string) error {
