@@ -1,10 +1,9 @@
 package server
 
 import (
-	"GO-COURSE-2024/internal/pkg/storage"
 	"encoding/json"
+	"go-course-2024/internal/pkg/storage"
 	"net/http"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +20,7 @@ type Entry struct {
 	Value string `json:"value"`
 }
 
-func New(host string, st *storage.Storage) *Server {
+func NewServer(host string, st *storage.Storage) *Server {
 	s := &Server{
 		host:    host,
 		storage: st,
@@ -30,10 +29,8 @@ func New(host string, st *storage.Storage) *Server {
 	return s
 }
 
-func (r *Server) newAPI() *gin.Engine {
+func (r *Server) NewAPI() *gin.Engine {
 	engine := gin.New()
-
-	// Обработчик для корневого URL
 	engine.GET("/", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": "Server is running"})
 	})
@@ -50,7 +47,11 @@ func (r *Server) newAPI() *gin.Engine {
 
 func (r *Server) handlerGetScalar(ctx *gin.Context) {
 	key := ctx.Param("key")
-	value := r.storage.Get(key)
+	value , err := r.storage.Get(key)
+	if err != nil{
+		ctx.AbortWithStatus(http.StatusNotFound)
+		return
+	}
 	if value == nil {
 		ctx.AbortWithStatus(http.StatusNotFound)
 		return
@@ -71,6 +72,6 @@ func (r *Server) handlerSetScalar(ctx *gin.Context) {
 	ctx.Status(http.StatusOK)
 }
 
-func (r *Server) Start() {
-	r.newAPI().Run(r.host)
+func (r *Server) Start() error {
+	return r.NewAPI().Run(r.host)
 }
