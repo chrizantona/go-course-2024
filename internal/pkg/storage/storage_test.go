@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
+	"time"
 )
 
 type testCase struct {
@@ -30,18 +31,18 @@ func BenchmarkSet(b *testing.B) {
 	for i, tCase := range cases {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
 			s := NewStorage()
-
 			for j := 0; j < tCase.cnt; j++ {
-				s.Set(strconv.Itoa(j), strconv.Itoa(j))
+				s.Set(strconv.Itoa(j), strconv.Itoa(j), 10*time.Second) 
 			}
 
 			b.ResetTimer()
 			for j := 0; j < b.N; j++ {
-				s.Set(strconv.Itoa(rand.Intn(tCase.cnt)), "fkjashdf")
+				s.Set(strconv.Itoa(rand.Intn(tCase.cnt)), "fkjashdf", 10*time.Second) 
 			}
 		})
 	}
 }
+
 
 // goos: darwin
 // goarch: arm64
@@ -59,11 +60,9 @@ func BenchmarkGet(b *testing.B) {
 	for i, tCase := range cases {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
 			s := NewStorage()
-
 			for j := 0; j < tCase.cnt; j++ {
-				s.Set(strconv.Itoa(j), strconv.Itoa(j))
+				s.Set(strconv.Itoa(j), strconv.Itoa(j), 10*time.Second)
 			}
-
 			b.ResetTimer()
 			for j := 0; j < b.N; j++ {
 				s.Get(strconv.Itoa(rand.Intn(tCase.cnt)))
@@ -71,6 +70,7 @@ func BenchmarkGet(b *testing.B) {
 		})
 	}
 }
+
 
 // goos: darwin
 // goarch: arm64
@@ -88,19 +88,21 @@ func BenchmarkGetSet(b *testing.B) {
 	for i, tCase := range cases {
 		b.Run(strconv.Itoa(i), func(b *testing.B) {
 			s := NewStorage()
-
 			for j := 0; j < tCase.cnt; j++ {
-				s.Set(strconv.Itoa(j), strconv.Itoa(j))
+				s.Set(strconv.Itoa(j), strconv.Itoa(j), 10*time.Second) 
 			}
 
 			var result string
 
 			b.ResetTimer()
-
 			for j := 0; j < b.N; j++ {
-				s.Set(strconv.Itoa(j), strconv.Itoa(j))
+				s.Set(strconv.Itoa(j), strconv.Itoa(j), 10*time.Second) 
 				if val, err := s.Get(strconv.Itoa(rand.Intn(tCase.cnt))); err == nil {
-					result = *val
+					if strVal, ok := (*val).(string); ok {
+						result = strVal
+					} else {
+						b.Error("Expected value to be of type string")
+					}
 				}
 			}
 
@@ -110,6 +112,8 @@ func BenchmarkGetSet(b *testing.B) {
 		})
 	}
 }
+
+
 
 // goos: darwin
 // goarch: arm64
@@ -126,19 +130,24 @@ func BenchmarkGetSet(b *testing.B) {
 func TestSetGetBasic(t *testing.T) {
 	cases := []testCase{
 		{"1", "testKey1", "testValue1", KindString},
-		{"2", "testKey2", "123", KindInt},
+		{"2", "testKey2", "123", KindInt}, 
 		{"3", "testKey3", "hello", KindString},
-		{"4", "testKey4", "456", KindInt},
+		{"4", "testKey4", "456", KindInt}, 
 	}
 
 	s := NewStorage()
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s.Set(c.key, c.value)
+			err := s.Set(c.key, c.value, 10*time.Second)
+			if err != nil {
+				t.Errorf("Unexpected error on Set: %v", err)
+				return
+			}
+
 			sValue, err := s.Get(c.key)
 			if err != nil {
-				t.Errorf("Unexpected error:%v", err)
+				t.Errorf("Unexpected error on Get: %v", err)
 				return
 			}
 
@@ -149,25 +158,31 @@ func TestSetGetBasic(t *testing.T) {
 	}
 }
 
+
 // PASS
 // ok      go-course-2024/internal/pkg/storage     0.594s
 
 func TestSetTypeDetermination(t *testing.T) {
 	cases := []testCase{
-		{"1", "intKey", "10", KindInt},
-		{"2", "stringKey", "keem", KindString},
-		{"3", "anotherIntKey", "42", KindInt},
-		{"4", "anotherStringKey", "kendrick", KindString},
+		{"1", "intKey", "10", KindInt},   
+		{"2", "stringKey", "keem", KindString},  
+		{"3", "anotherIntKey", "42", KindInt},   
+		{"4", "anotherStringKey", "kendrick", KindString}, 
 	}
 
 	s := NewStorage()
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s.Set(c.key, c.value)
+			err := s.Set(c.key, c.value, 10*time.Second)
+			if err != nil {
+				t.Errorf("Unexpected error on Set: %v", err)
+				return
+			}
+
 			sKind, err := s.GetKind(c.key)
 			if err != nil {
-				t.Errorf("Unexpected error %v", err)
+				t.Errorf("Unexpected error on GetKind: %v", err)
 				return
 			}
 

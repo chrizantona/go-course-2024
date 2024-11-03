@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"io/ioutil"
 	"strconv"
+	"time"
 )
 
 type Kind string
@@ -18,11 +19,18 @@ const (
 	KindDict    Kind = "M"
 )
 
+type value struct {
+	v         interface{}
+	expiresAt int64
+}
+
 type Storage struct {
 	listStorage map[string][]string
-	inner       map[string]interface{}
+	inner       map[string]interface{} 
+	expiration  map[string]int64        
 	logger      *zap.Logger
 }
+
 
 func NewStorage() *Storage {
 	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
@@ -31,9 +39,11 @@ func NewStorage() *Storage {
 	return &Storage{
 		listStorage: make(map[string][]string),
 		inner:       make(map[string]interface{}),
+		expiration:  make(map[string]int64),
 		logger:      logger,
 	}
 }
+
 
 func (s *Storage) LPUSH(key string, elements ...string) error {
 	if _, exists := s.inner[key]; exists {
@@ -123,30 +133,57 @@ func (s *Storage) LGET(key string, index uint) (string, error) {
 	return list[index], nil
 }
 
-func (r *Storage) Set(key, value string) error {
+func (r *Storage) Set(key string, value interface{}, ttl time.Duration) error {
 	if _, exists := r.listStorage[key]; exists {
 		return fmt.Errorf("key %s already exists in listStorage", key)
 	}
 	r.inner[key] = value
-	r.logger.Info("set value in storage", zap.String("key", key), zap.String("value", value))
+	r.expiration[key] = time.Now().Add(ttl).UnixMilli()
+	r.logger.Info("set value in storage", zap.String("key", key), zap.Any("value", value))
 	return nil
 }
 
-func (r *Storage) Get(key string) (*string, error) {
+
+func (r *Storage) Get(key string) (*interface{}, error) {
 	res, ok := r.inner[key]
 	if !ok {
 		r.logger.Warn("key not found in storage", zap.String("key", key))
 		return nil, fmt.Errorf("key %s not found", key)
 	}
 
-	if strValue, ok := res.(string); ok {
-		r.logger.Info("retrieved value from storage", zap.String("key", key), zap.String("value", strValue))
-		return &strValue, nil 
+	if time.Now().UnixMilli() >= r.expiration[key] {
+		delete(r.inner, key)     
+		delete(r.expiration, key)   
+		r.logger.Info("key expired and deleted", zap.String("key", key))
+		return nil, fmt.Errorf("key %s has expired", key)
 	}
 
-	r.logger.Warn("value is not a string", zap.String("key", key))
-	return nil, fmt.Errorf("value for key %s is not a string", key)
+	r.logger.Info("retrieved value from storage", zap.String("key", key), zap.Any("value", res))
+	return &res, nil
 }
+
+
+func (s *Storage) StartCleanup(interval time.Duration) {
+	go func() {
+		for {
+			time.Sleep(interval)
+			s.cleanExpiredKeys()
+		}
+	}()
+}
+
+func (s *Storage) cleanExpiredKeys() {
+	s.logger.Info("cleaning expired keys")
+	for key, expirationTime := range s.expiration {
+		if time.Now().UnixMilli() >= expirationTime {
+			delete(s.inner, key)  
+			delete(s.expiration, key)   
+			s.logger.Info("deleted expired key", zap.String("key", key))
+		}
+	}
+}
+
+
 
 func (r *Storage) GetKind(key string) (Kind, error) {
 	res, ok := r.inner[key]

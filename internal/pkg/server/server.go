@@ -5,6 +5,7 @@ import (
 	"go-course-2024/internal/pkg/storage"
 	"net/http"
 	"github.com/gin-gonic/gin"
+	"time"
 )
 
 type Response struct {
@@ -18,7 +19,9 @@ type Server struct {
 
 type Entry struct {
 	Value string `json:"value"`
+	TTL   int64  `json:"ttl"` 
 }
+
 
 func NewServer(host string, st *storage.Storage) *Server {
 	s := &Server{
@@ -47,17 +50,25 @@ func (r *Server) NewAPI() *gin.Engine {
 
 func (r *Server) handlerGetScalar(ctx *gin.Context) {
 	key := ctx.Param("key")
-	value , err := r.storage.Get(key)
-	if err != nil{
+	valuePtr, err := r.storage.Get(key)
+	if err != nil {
 		ctx.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	if value == nil {
+	if valuePtr == nil {
 		ctx.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	ctx.JSON(http.StatusOK, Entry{Value: *value})
+	value, ok := (*valuePtr).(string)
+	if !ok {
+		ctx.AbortWithStatus(http.StatusInternalServerError) 
+		return
+	}
+
+	ctx.JSON(http.StatusOK, Entry{Value: value})
 }
+
+
 
 func (r *Server) handlerSetScalar(ctx *gin.Context) {
 	key := ctx.Param("key")
@@ -68,9 +79,16 @@ func (r *Server) handlerSetScalar(ctx *gin.Context) {
 		return
 	}
 
-	r.storage.Set(key, entry.Value)
+	ttl := time.Duration(entry.TTL) * time.Second
+	if err := r.storage.Set(key, entry.Value, ttl); err != nil {
+		ctx.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
 	ctx.Status(http.StatusOK)
 }
+
+
 
 func (r *Server) Start() error {
 	return r.NewAPI().Run(r.host)
