@@ -1,8 +1,9 @@
 package server
 
 import (
-	"encoding/json"
+	"go.uber.org/zap"
 	"go-course-2024/internal/pkg/storage"
+	
 	"net/http"
 	"github.com/gin-gonic/gin"
 	"time"
@@ -37,9 +38,8 @@ func (r *Server) NewAPI() *gin.Engine {
 	engine.GET("/", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": "Server is running"})
 	})
-
 	engine.GET("/health", func(ctx *gin.Context) {
-		ctx.Status(http.StatusOK)
+		ctx.JSON(http.StatusOK, gin.H{"status": "Healthy"})
 	})
 
 	engine.GET("/scalar/get/:key", r.handlerGetScalar)
@@ -49,44 +49,65 @@ func (r *Server) NewAPI() *gin.Engine {
 }
 
 func (r *Server) handlerGetScalar(ctx *gin.Context) {
-	key := ctx.Param("key")
-	valuePtr, err := r.storage.Get(key)
-	if err != nil {
-		ctx.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-	if valuePtr == nil {
-		ctx.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-	value, ok := (*valuePtr).(string)
-	if !ok {
-		ctx.AbortWithStatus(http.StatusInternalServerError) 
-		return
-	}
-
-	ctx.JSON(http.StatusOK, Entry{Value: value})
+    key := ctx.Param("key")
+    valuePtr, err := r.storage.Get(key)
+    if err != nil {
+        r.storage.Logger().Warn("Error retrieving key", zap.String("key", key), zap.Error(err))
+        ctx.JSON(http.StatusNotFound, gin.H{"error": "Key not found or expired"})
+        return
+    }
+    if valuePtr == nil {
+        r.storage.Logger().Warn("Key not found or expired", zap.String("key", key))
+        ctx.JSON(http.StatusNotFound, gin.H{"error": "Key not found or expired"})
+        return
+    }
+    value, ok := (*valuePtr).(string)
+    if !ok {
+        r.storage.Logger().Error("Value type mismatch", zap.String("key", key))
+        ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Value type mismatch"})
+        return
+    }
+    r.storage.Logger().Info("Key retrieved", zap.String("key", key), zap.Any("value", value))
+    ctx.JSON(http.StatusOK, gin.H{"value": value})
 }
 
 
 
 func (r *Server) handlerSetScalar(ctx *gin.Context) {
-	key := ctx.Param("key")
-	var entry Entry
+    r.storage.Logger().Info("Start handlerSetScalar")
+    key := ctx.Param("key")
+    r.storage.Logger().Info("Parsed key", zap.String("key", key))
 
-	if err := json.NewDecoder(ctx.Request.Body).Decode(&entry); err != nil {
-		ctx.AbortWithStatus(http.StatusBadRequest)
-		return
-	}
+    var entry Entry
+    if err := ctx.ShouldBindJSON(&entry); err != nil {
+        r.storage.Logger().Error("Invalid JSON in request", zap.Error(err))
+        ctx.JSON(http.StatusBadRequest, gin.H{
+            "error": "Invalid JSON",
+            "details": err.Error(), 
+        })
+        return
+    }
 
-	ttl := time.Duration(entry.TTL) * time.Second
-	if err := r.storage.Set(key, entry.Value, ttl); err != nil {
-		ctx.AbortWithStatus(http.StatusInternalServerError)
-		return
-	}
 
-	ctx.Status(http.StatusOK)
+    ttl := time.Duration(entry.TTL) * time.Second
+    r.storage.Logger().Info("Parsed TTL", zap.Duration("ttl", ttl))
+
+
+    if err := r.storage.Set(key, entry.Value, ttl); err != nil {
+        r.storage.Logger().Error("Failed to set value in storage", zap.String("key", key), zap.Error(err))
+        ctx.JSON(http.StatusInternalServerError, gin.H{
+            "error":   "Failed to set value in storage",
+            "details": err.Error(),
+        })
+        return
+    }
+
+    r.storage.Logger().Info("Set value successfully", zap.String("key", key), zap.Any("value", entry.Value))
+    ctx.JSON(http.StatusOK, gin.H{"status": "Value set successfully"})
 }
+
+
+
 
 
 

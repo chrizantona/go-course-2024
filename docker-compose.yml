@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  storage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8090"
+    volumes:
+      - storage_data:/root/storage_data
+    stop_signal: SIGINT
+    command: ["./storage"]
+
+volumes:
+  storage_data:

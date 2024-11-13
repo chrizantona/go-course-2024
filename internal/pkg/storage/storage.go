@@ -3,11 +3,13 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"io/ioutil"
 	"strconv"
+	"sync"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type Kind string
@@ -26,11 +28,16 @@ type value struct {
 
 type Storage struct {
 	listStorage map[string][]string
-	inner       map[string]interface{} 
-	expiration  map[string]int64        
+	inner       map[string]interface{}
+	expiration  map[string]int64
 	logger      *zap.Logger
+	mu          sync.RWMutex 
 }
 
+
+func (s *Storage) Logger() *zap.Logger {
+    return s.logger
+}
 
 func NewStorage() *Storage {
 	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
@@ -174,6 +181,8 @@ func (s *Storage) StartCleanup(interval time.Duration) {
 
 func (s *Storage) cleanExpiredKeys() {
 	s.logger.Info("cleaning expired keys")
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for key, expirationTime := range s.expiration {
 		if time.Now().UnixMilli() >= expirationTime {
 			delete(s.inner, key)  
@@ -216,25 +225,65 @@ func (r *Storage) GetKind(key string) (Kind, error) {
 }
 
 func (s *Storage) SaveToFile(filename string) error {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("error marshalling storage: %v", err)
-	}
-	if err := ioutil.WriteFile(filename, data, 0666); err != nil {
-		return fmt.Errorf("error writing to file: %v", err)
-	}
-	s.logger.Info("Storage saved to file", zap.String("filename", filename))
-	return nil
+    s.logger.Info("Attempting to save storage to file", zap.String("filename", filename))
+
+
+    if len(s.inner) == 0 {
+        s.logger.Warn("No data to save. Storage is empty")
+        return nil
+    }
+
+
+    saveData := struct {
+        Inner      map[string]interface{} `json:"inner"`
+        Expiration map[string]int64       `json:"expiration"`
+    }{
+        Inner:      s.inner,
+        Expiration: s.expiration,
+    }
+
+
+    data, err := json.Marshal(saveData)
+    if err != nil {
+        s.logger.Error("Error marshalling storage", zap.Error(err))
+        return fmt.Errorf("error marshalling storage: %v", err)
+    }
+
+
+    if err := ioutil.WriteFile(filename, data, 0666); err != nil {
+        s.logger.Error("Error writing to file", zap.String("filename", filename), zap.Error(err))
+        return fmt.Errorf("error writing to file: %v", err)
+    }
+
+    s.logger.Info("Data successfully saved to file", zap.String("filename", filename))
+    return nil
 }
 
+
 func (s *Storage) LoadFromFile(filename string) error {
-	file, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("error reading file: %v", err)
-	}
-	if err := json.Unmarshal(file, s); err != nil {
-		return fmt.Errorf("error unmarshalling storage: %v", err)
-	}
-	s.logger.Info("Storage loaded from file", zap.String("filename", filename))
-	return nil
+    s.logger.Info("Attempting to load storage from file", zap.String("filename", filename))
+
+
+    file, err := ioutil.ReadFile(filename)
+    if err != nil {
+        s.logger.Error("Error reading file", zap.String("filename", filename), zap.Error(err))
+        return fmt.Errorf("error reading file: %v", err)
+    }
+
+    loadData := struct {
+        Inner      map[string]interface{} `json:"inner"`
+        Expiration map[string]int64       `json:"expiration"`
+    }{}
+
+
+    if err := json.Unmarshal(file, &loadData); err != nil {
+        s.logger.Error("Error unmarshalling storage", zap.Error(err))
+        return fmt.Errorf("error unmarshalling storage: %v", err)
+    }
+
+    s.inner = loadData.Inner
+    s.expiration = loadData.Expiration
+
+    s.logger.Info("Data successfully loaded from file", zap.String("filename", filename))
+    return nil
 }
