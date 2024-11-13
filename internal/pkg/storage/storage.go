@@ -3,10 +3,13 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"io/ioutil"
 	"strconv"
+	"sync"
+	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type Kind string
@@ -15,12 +18,25 @@ const (
 	KindInt     Kind = "D"
 	KindString  Kind = "S"
 	KindUnknown Kind = ""
+	KindDict    Kind = "M"
 )
+
+type value struct {
+	v         interface{}
+	expiresAt int64
+}
 
 type Storage struct {
 	listStorage map[string][]string
-	inner       map[string]string
+	inner       map[string]interface{}
+	expiration  map[string]int64
 	logger      *zap.Logger
+	mu          sync.RWMutex 
+}
+
+
+func (s *Storage) Logger() *zap.Logger {
+    return s.logger
 }
 
 func NewStorage() *Storage {
@@ -29,10 +45,12 @@ func NewStorage() *Storage {
 	logger.Info("created new storage")
 	return &Storage{
 		listStorage: make(map[string][]string),
-		inner:       make(map[string]string),
+		inner:       make(map[string]interface{}),
+		expiration:  make(map[string]int64),
 		logger:      logger,
 	}
 }
+
 
 func (s *Storage) LPUSH(key string, elements ...string) error {
 	if _, exists := s.inner[key]; exists {
@@ -122,24 +140,59 @@ func (s *Storage) LGET(key string, index uint) (string, error) {
 	return list[index], nil
 }
 
-func (r *Storage) Set(key, value string) error {
+func (r *Storage) Set(key string, value interface{}, ttl time.Duration) error {
 	if _, exists := r.listStorage[key]; exists {
 		return fmt.Errorf("key %s already exists in listStorage", key)
 	}
 	r.inner[key] = value
-	r.logger.Info("set value in storage", zap.String("key", key), zap.String("value", value))
+	r.expiration[key] = time.Now().Add(ttl).UnixMilli()
+	r.logger.Info("set value in storage", zap.String("key", key), zap.Any("value", value))
 	return nil
 }
 
-func (r *Storage) Get(key string) (*string, error) {
+
+func (r *Storage) Get(key string) (*interface{}, error) {
 	res, ok := r.inner[key]
 	if !ok {
 		r.logger.Warn("key not found in storage", zap.String("key", key))
 		return nil, fmt.Errorf("key %s not found", key)
 	}
-	r.logger.Info("retrieved value from storage", zap.String("key", key), zap.String("value", res))
+
+	if time.Now().UnixMilli() >= r.expiration[key] {
+		delete(r.inner, key)     
+		delete(r.expiration, key)   
+		r.logger.Info("key expired and deleted", zap.String("key", key))
+		return nil, fmt.Errorf("key %s has expired", key)
+	}
+
+	r.logger.Info("retrieved value from storage", zap.String("key", key), zap.Any("value", res))
 	return &res, nil
 }
+
+
+func (s *Storage) StartCleanup(interval time.Duration) {
+	go func() {
+		for {
+			time.Sleep(interval)
+			s.cleanExpiredKeys()
+		}
+	}()
+}
+
+func (s *Storage) cleanExpiredKeys() {
+	s.logger.Info("cleaning expired keys")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, expirationTime := range s.expiration {
+		if time.Now().UnixMilli() >= expirationTime {
+			delete(s.inner, key)  
+			delete(s.expiration, key)   
+			s.logger.Info("deleted expired key", zap.String("key", key))
+		}
+	}
+}
+
+
 
 func (r *Storage) GetKind(key string) (Kind, error) {
 	res, ok := r.inner[key]
@@ -148,37 +201,89 @@ func (r *Storage) GetKind(key string) (Kind, error) {
 		return KindUnknown, fmt.Errorf("key %s not found", key)
 	}
 
-	if _, err := strconv.Atoi(res); err == nil {
-		kind := KindInt
+	strValue, ok := res.(string)
+	if ok {
+		if _, err := strconv.Atoi(strValue); err == nil {
+			kind := KindInt
+			r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
+			return kind, nil
+		}
+
+		kind := KindString
 		r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
 		return kind, nil
 	}
 
-	kind := KindString
-	r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
-	return kind, nil
+	if _, ok := res.(map[string]interface{}); ok {
+		kind := KindDict
+		r.logger.Info("determined kind of value", zap.String("key", key), zap.String("kind", string(kind)))
+		return kind, nil
+	}
+
+	r.logger.Warn("unknown kind for key", zap.String("key", key))
+	return KindUnknown, fmt.Errorf("unknown kind for key %s", key)
 }
 
 func (s *Storage) SaveToFile(filename string) error {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("error marshalling storage: %v", err)
-	}
-	if err := ioutil.WriteFile(filename, data, 0666); err != nil {
-		return fmt.Errorf("error writing to file: %v", err)
-	}
-	s.logger.Info("Storage saved to file", zap.String("filename", filename))
-	return nil
+    s.logger.Info("Attempting to save storage to file", zap.String("filename", filename))
+
+
+    if len(s.inner) == 0 {
+        s.logger.Warn("No data to save. Storage is empty")
+        return nil
+    }
+
+
+    saveData := struct {
+        Inner      map[string]interface{} `json:"inner"`
+        Expiration map[string]int64       `json:"expiration"`
+    }{
+        Inner:      s.inner,
+        Expiration: s.expiration,
+    }
+
+
+    data, err := json.Marshal(saveData)
+    if err != nil {
+        s.logger.Error("Error marshalling storage", zap.Error(err))
+        return fmt.Errorf("error marshalling storage: %v", err)
+    }
+
+
+    if err := ioutil.WriteFile(filename, data, 0666); err != nil {
+        s.logger.Error("Error writing to file", zap.String("filename", filename), zap.Error(err))
+        return fmt.Errorf("error writing to file: %v", err)
+    }
+
+    s.logger.Info("Data successfully saved to file", zap.String("filename", filename))
+    return nil
 }
 
+
 func (s *Storage) LoadFromFile(filename string) error {
-	file, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("error reading file: %v", err)
-	}
-	if err := json.Unmarshal(file, s); err != nil {
-		return fmt.Errorf("error unmarshalling storage: %v", err)
-	}
-	s.logger.Info("Storage loaded from file", zap.String("filename", filename))
-	return nil
+    s.logger.Info("Attempting to load storage from file", zap.String("filename", filename))
+
+
+    file, err := ioutil.ReadFile(filename)
+    if err != nil {
+        s.logger.Error("Error reading file", zap.String("filename", filename), zap.Error(err))
+        return fmt.Errorf("error reading file: %v", err)
+    }
+
+    loadData := struct {
+        Inner      map[string]interface{} `json:"inner"`
+        Expiration map[string]int64       `json:"expiration"`
+    }{}
+
+
+    if err := json.Unmarshal(file, &loadData); err != nil {
+        s.logger.Error("Error unmarshalling storage", zap.Error(err))
+        return fmt.Errorf("error unmarshalling storage: %v", err)
+    }
+
+    s.inner = loadData.Inner
+    s.expiration = loadData.Expiration
+
+    s.logger.Info("Data successfully loaded from file", zap.String("filename", filename))
+    return nil
 }
