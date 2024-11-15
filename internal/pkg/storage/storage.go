@@ -40,16 +40,15 @@ func (s *Storage) Logger() *zap.Logger {
 }
 
 func NewStorage() *Storage {
-	logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
-	defer logger.Sync()
-	logger.Info("created new storage")
-	return &Storage{
-		listStorage: make(map[string][]string),
-		inner:       make(map[string]interface{}),
-		expiration:  make(map[string]int64),
-		logger:      logger,
-	}
+    logger, _ := zap.NewProduction(zap.IncreaseLevel(zapcore.DPanicLevel))
+    return &Storage{
+        listStorage: make(map[string][]string),
+        inner:       make(map[string]interface{}),  
+        expiration:  make(map[string]int64),       
+        logger:      logger,
+    }
 }
+
 
 
 func (s *Storage) LPUSH(key string, elements ...string) error {
@@ -141,14 +140,29 @@ func (s *Storage) LGET(key string, index uint) (string, error) {
 }
 
 func (r *Storage) Set(key string, value interface{}, ttl time.Duration) error {
-	if _, exists := r.listStorage[key]; exists {
-		return fmt.Errorf("key %s already exists in listStorage", key)
-	}
-	r.inner[key] = value
-	r.expiration[key] = time.Now().Add(ttl).UnixMilli()
-	r.logger.Info("set value in storage", zap.String("key", key), zap.Any("value", value))
-	return nil
+    if r.inner == nil {
+        r.logger.Error("inner map is nil, initializing")
+        r.inner = make(map[string]interface{})
+    }
+    if r.expiration == nil {
+        r.logger.Error("expiration map is nil, initializing")
+        r.expiration = make(map[string]int64)
+    }
+
+    r.logger.Info("Setting key in storage", zap.String("key", key), zap.Any("value", value))
+
+    if _, exists := r.listStorage[key]; exists {
+        return fmt.Errorf("key %s already exists in listStorage", key)
+    }
+
+    r.inner[key] = value
+    r.expiration[key] = time.Now().Add(ttl).UnixMilli()
+    r.logger.Info("Set value successfully", zap.String("key", key), zap.Any("value", value))
+
+    return nil
 }
+
+
 
 
 func (r *Storage) Get(key string) (*interface{}, error) {
