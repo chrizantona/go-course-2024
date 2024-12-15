@@ -9,7 +9,6 @@ COPY . .
 
 RUN go build -o storage ./cmd/main.go
 
-
 FROM ubuntu:22.04
 
 WORKDIR /root/

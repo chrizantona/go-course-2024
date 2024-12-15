@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
+	"database/sql"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -27,11 +27,53 @@ type value struct {
 }
 
 type Storage struct {
+	db *sql.DB
 	listStorage map[string][]string
 	inner       map[string]interface{}
 	expiration  map[string]int64
 	logger      *zap.Logger
 	mu          sync.RWMutex 
+}
+
+func NewStorageWithDB(db *sql.DB) *Storage {
+	return &Storage{
+		db:          db,
+		listStorage: make(map[string][]string),
+		inner:       make(map[string]interface{}),
+		expiration:  make(map[string]int64),
+	}
+}
+
+
+func (s *Storage) SaveState(payload interface{}) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	_, err = s.db.Exec(`
+		INSERT INTO core (timestamp, payload)
+		VALUES ($1, $2)`, time.Now().UnixMilli(), data)
+	if err != nil {
+		return fmt.Errorf("failed to insert state: %w", err)
+	}
+
+	_, err = s.db.Exec(`
+		DELETE FROM core
+		WHERE version < (
+			SELECT MIN(version)
+			FROM (
+				SELECT version
+				FROM core
+				ORDER BY version DESC
+				LIMIT 5
+			) AS subquery
+		)`)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup old states: %w", err)
+	}
+
+	return nil
 }
 
 
@@ -238,15 +280,13 @@ func (r *Storage) GetKind(key string) (Kind, error) {
 	return KindUnknown, fmt.Errorf("unknown kind for key %s", key)
 }
 
-func (s *Storage) SaveToFile(filename string) error {
-    s.logger.Info("Attempting to save storage to file", zap.String("filename", filename))
-
+func (s *Storage) SaveToFile(_ string) error {
+    s.logger.Info("Attempting to save storage to database")
 
     if len(s.inner) == 0 {
         s.logger.Warn("No data to save. Storage is empty")
         return nil
     }
-
 
     saveData := struct {
         Inner      map[string]interface{} `json:"inner"`
@@ -256,22 +296,15 @@ func (s *Storage) SaveToFile(filename string) error {
         Expiration: s.expiration,
     }
 
-
-    data, err := json.Marshal(saveData)
-    if err != nil {
-        s.logger.Error("Error marshalling storage", zap.Error(err))
-        return fmt.Errorf("error marshalling storage: %v", err)
+    if err := s.SaveState(saveData); err != nil {
+        s.logger.Error("Error saving state to database", zap.Error(err))
+        return fmt.Errorf("error saving state to database: %v", err)
     }
 
-
-    if err := ioutil.WriteFile(filename, data, 0666); err != nil {
-        s.logger.Error("Error writing to file", zap.String("filename", filename), zap.Error(err))
-        return fmt.Errorf("error writing to file: %v", err)
-    }
-
-    s.logger.Info("Data successfully saved to file", zap.String("filename", filename))
+    s.logger.Info("Data successfully saved to database")
     return nil
 }
+
 
 
 func (s *Storage) LoadFromFile(filename string) error {

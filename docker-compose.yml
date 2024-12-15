@@ -1,4 +1,15 @@
 services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: "test"
+      POSTGRES_USER: "username"
+      POSTGRES_PASSWORD: "password"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
   storage:
     build:
       context: .
@@ -7,8 +18,12 @@ services:
       - "8090:8090"
     volumes:
       - storage_data:/root/storage_data
-    stop_signal: SIGINT
+    environment:
+      POSTGRES: postgresql://username:password@postgres:5432/test?sslmode=disable
+    depends_on:
+      - postgres
     command: ["./storage"]
 
 volumes:
   storage_data:
+  postgres:
