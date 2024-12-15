@@ -74,37 +74,38 @@ func (r *Server) handlerGetScalar(ctx *gin.Context) {
 
 
 func (r *Server) handlerSetScalar(ctx *gin.Context) {
-    r.storage.Logger().Info("Start handlerSetScalar")
-    key := ctx.Param("key")
-    r.storage.Logger().Info("Parsed key", zap.String("key", key))
+	r.storage.Logger().Info("Start handlerSetScalar")
+	key := ctx.Param("key")
+	r.storage.Logger().Info("Parsed key", zap.String("key", key))
 
-    var entry Entry
-    if err := ctx.ShouldBindJSON(&entry); err != nil {
-        r.storage.Logger().Error("Invalid JSON in request", zap.Error(err))
-        ctx.JSON(http.StatusBadRequest, gin.H{
-            "error": "Invalid JSON",
-            "details": err.Error(), 
-        })
-        return
-    }
+	var entry Entry
+	if err := ctx.ShouldBindJSON(&entry); err != nil {
+		r.storage.Logger().Error("Invalid JSON in request", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid JSON",
+			"details": err.Error(),
+		})
+		return
+	}
 
+	r.storage.Logger().Info("Parsed entry", zap.Any("entry", entry))
 
-    ttl := time.Duration(entry.TTL) * time.Second
-    r.storage.Logger().Info("Parsed TTL", zap.Duration("ttl", ttl))
+	ttl := time.Duration(entry.TTL) * time.Second
+	r.storage.Logger().Info("Parsed TTL", zap.Duration("ttl", ttl))
 
+	if err := r.storage.Set(key, entry.Value, ttl); err != nil {
+		r.storage.Logger().Error("Failed to set value in storage", zap.String("key", key), zap.Error(err))
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to set value in storage",
+			"details": err.Error(),
+		})
+		return
+	}
 
-    if err := r.storage.Set(key, entry.Value, ttl); err != nil {
-        r.storage.Logger().Error("Failed to set value in storage", zap.String("key", key), zap.Error(err))
-        ctx.JSON(http.StatusInternalServerError, gin.H{
-            "error":   "Failed to set value in storage",
-            "details": err.Error(),
-        })
-        return
-    }
-
-    r.storage.Logger().Info("Set value successfully", zap.String("key", key), zap.Any("value", entry.Value))
-    ctx.JSON(http.StatusOK, gin.H{"status": "Value set successfully"})
+	r.storage.Logger().Info("Set value successfully", zap.String("key", key), zap.Any("value", entry.Value))
+	ctx.JSON(http.StatusOK, gin.H{"status": "Value set successfully"})
 }
+
 
 
 
