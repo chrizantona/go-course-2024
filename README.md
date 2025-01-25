@@ -33,7 +33,7 @@
 
 Проект был разработан с использованием следующих технологий и инструментов:
 
-- **Язык программирования:** Golang (Concurrency, HTTP).
+- **Язык программирования:** Golang
 - **Фреймворк:** Gin для создания HTTP API.
 - **Базы данных:**
   - In-memory database для быстрого доступа.
@@ -98,7 +98,7 @@ curl -X GET http://localhost:8080/get?key=name
 Ответ:
 
 ```json
-"Ф"
+"Alan"
 ```
 
 #### Работа со словарями
@@ -106,7 +106,7 @@ curl -X GET http://localhost:8080/get?key=name
 **HSET key field value**
 
 ```bash
-curl -X POST http://localhost:8080/hash/set -d 'key=user&field=name&value="Anton"'
+curl -X POST http://localhost:8080/hash/set -d 'key=user&field=name&value="Alan"'
 ```
 
 Ответ:
@@ -124,7 +124,7 @@ curl -X GET http://localhost:8080/hash/get?key=user&field=name
 Ответ:
 
 ```json
-"Anton"
+"Alan"
 ```
 
 #### Работа с массивами
